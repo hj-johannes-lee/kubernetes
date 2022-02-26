@@ -17,6 +17,7 @@ limitations under the License.
 package validation
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -6866,4 +6867,29 @@ func sameLoadBalancerClass(oldService, service *core.Service) bool {
 		return false
 	}
 	return *oldService.Spec.LoadBalancerClass == *service.Spec.LoadBalancerClass
+}
+
+// ValidateResourceClaimSpec validates a ResourceClaimSpec. It is used for the
+// core and cdi API.
+func ValidateResourceClaimSpec(spec *core.ResourceClaimSpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	for _, msg := range ValidateClassName(spec.ResourceClassName, false) {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("resourceClassName"), spec.ResourceClassName, msg))
+	}
+	return allErrs
+}
+
+// ValidateResourceClaimSpecUnmodified checks that a ResourceClaimSpec doesn't change.
+func ValidateResourceClaimSpecUnmodified(spec, oldSpec *core.ResourceClaimSpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	if spec.ResourceClassName != oldSpec.ResourceClassName {
+		allErrs = append(allErrs, field.Forbidden(fldPath.Child("resourceClassName"), "updates are forbidden"))
+	}
+	if bytes.Compare(spec.Parameters.Raw, oldSpec.Parameters.Raw) != 0 {
+		allErrs = append(allErrs, field.Forbidden(fldPath.Child("parameters"), "updates are forbidden"))
+	}
+	if spec.AllocationMode != oldSpec.AllocationMode {
+		allErrs = append(allErrs, field.Forbidden(fldPath.Child("allocationMode"), "updates are forbidden"))
+	}
+	return allErrs
 }

@@ -19,6 +19,7 @@ package v1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -2279,6 +2280,11 @@ type ResourceRequirements struct {
 	// More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 	// +optional
 	Requests ResourceList `json:"requests,omitempty" protobuf:"bytes,2,rep,name=requests,casttype=ResourceList,castkey=ResourceName"`
+	// The entries are the names of resources in PodSpec.ResourceClaims
+	// that are used by the container.
+	//
+	// +listType=set
+	Claims []string `json:"claims,omitempty" protobuf:"bytes,3,opt,name=claims"`
 }
 
 const (
@@ -3298,6 +3304,16 @@ type PodSpec struct {
 	// +optional
 	// This is a beta field and requires the IdentifyPodOS feature
 	OS *PodOS `json:"os,omitempty" protobuf:"bytes,36,opt,name=os"`
+	// ResourceClaims defines which ResourceClaims must be allocated
+	// and reserved before the Pod is allowed to start. The resources
+	// will be made available to those containers which reference them
+	// by name.
+	//
+	// +patchMergeKey=name
+	// +patchStrategy=merge,retainKeys
+	// +listType=map
+	// +listMapKey=name
+	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty" patchStrategy:"merge,retainKeys" patchMergeKey:"name" protobuf:"bytes,37,rep,name=resourceClaims"`
 }
 
 // OSName is the set of OS'es that can be used in OS.
@@ -6561,3 +6577,95 @@ type PortStatus struct {
 	// +kubebuilder:validation:MaxLength=316
 	Error *string `json:"error,omitempty" protobuf:"bytes,3,opt,name=error"`
 }
+
+// PodResourceClaim references exactly one ResourceClaim, either by name or
+// by embedding a template for a ResourceClaim that will get created
+// by the resource claim controller in kube-controller-manager.
+type PodResourceClaim struct {
+	// A name under which this resource can be referenced by the containers.
+	Name string `json:"name,omitempty" protobuf:"bytes,1,name=name"`
+
+	// The resource is independent of the Pod and defined by
+	// a separate ResourceClaim in the same namespace as
+	// the Pod. Either this or Template must be set, but not both.
+	ResourceClaimName *string `json:"resourceClaimName,omitempty" protobuf:"bytes,2,opt,name=resourceClaimName"`
+
+	// Will be used to create a stand-alone ResourceClaim to allocate the resource.
+	// The pod in which this PodResource is embedded will be the
+	// owner of the ResourceClaim, i.e. the ResourceClaim will be deleted together with the
+	// pod.  The name of the ResourceClaim will be `<pod name>-<resource name>` where
+	// `<resource name>` is the name PodResource.Name
+	// Pod validation will reject the pod if the concatenated name
+	// is not valid for a ResourceClaim (for example, too long).
+	//
+	// An existing ResourceClaim with that name that is not owned by the pod
+	// will *not* be used for the pod to avoid using an unrelated
+	// resource by mistake. Starting the pod is then blocked until
+	// the unrelated ResourceClaim is removed. If such a pre-created ResourceClaim is
+	// meant to be used by the pod, the ResourceClaim has to be updated with an
+	// owner reference to the pod once the pod exists. Normally
+	// this should not be necessary, but it may be useful when
+	// manually reconstructing a broken cluster.
+	//
+	// This field is read-only and no changes will be made by Kubernetes
+	// to the ResourceClaim after it has been created.
+	// Either this or ResourceClaimName must be set, but not both.
+	Template *ResourceClaimTemplate `json:"template,omitempty" protobuf:"bytes,3,opt,name=template"`
+}
+
+// ResourceClaimTemplate is used to produce ResourceClaim objects by embedding
+// such a template in the ResourceRequirements of a Pod.
+type ResourceClaimTemplate struct {
+	// May contain labels and annotations that will be copied into the PVC
+	// when creating it. No other fields are allowed and will be rejected during
+	// validation.
+	//
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// The specification for the ResourceClaim. The entire content is
+	// copied unchanged into the PVC that gets created from this
+	// template. The same fields as in a ResourceClaim
+	// are also valid here.
+	Spec ResourceClaimSpec `json:"spec" protobuf:"bytes,2,name=spec"`
+}
+
+// ResourceClaimSpec defines how a resource is to be allocated.
+type ResourceClaimSpec struct {
+	// ResourceClassName references the driver and additional parameters
+	// via the name of a ResourceClass that was created as part of the
+	// driver deployment.
+	//
+	// The apiserver does not check that the referenced class exists, but a
+	// driver-specific admission webhook may require that and is allowed to
+	// reject claims where the class is missing.
+	ResourceClassName string `json:"resourceClassName" protobuf:"bytes,1,name=resourceClassName"`
+
+	// Parameters holds arbitrary values that will be available to the
+	// driver when allocating a resource for the claim.
+	Parameters runtime.RawExtension `json:"parameters,omitempty" protobuf:"bytes,2,opt,name=parameters"`
+
+	// Allocation can start immediately or when a Pod wants to use the
+	// resource. Waiting for a Pod is the default.
+	AllocationMode AllocationMode `json:"allocationMode,omitempty" protobuf:"bytes,3,opt,name=allocationMode"`
+}
+
+// AllocationMode describes whether a ResourceClaim gets allocated immediately
+// when it gets created (AllocationModeImmediate) or whether allocation is
+// delayed until it is needed for a Pod (AllocationModeDelayed). Other modes
+// might get added in the future.
+type AllocationMode string
+
+const (
+	// When a ResourceClaim has AllocationModeDelayed, allocation is
+	// delayed until a Pod gets scheduled that needs the ResourceClaim. The
+	// scheduler will consider all resource requirements of that Pod and
+	// trigger allocation for a node that fits the Pod.
+	AllocationModeDelayed AllocationMode = "Delayed"
+
+	// When a ResourceClaim has AllocationModeImmediate, allocation starts
+	// as soon as the ResourceClaim gets created. This is done without
+	// considering the needs of Pods that will use the ResourceClaim
+	// because those Pods are not known yet.
+	AllocationModeImmediate AllocationMode = "Immediate"
+)

@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -2151,6 +2152,11 @@ type ResourceRequirements struct {
 	// otherwise to an implementation-defined value
 	// +optional
 	Requests ResourceList
+	// The entries are the names of resources in PodSpec.ResourceClaims
+	// that are used by the container.
+	//
+	// +listType=set
+	Claims []string
 }
 
 // Container represents a single container that is expected to be run on the host.
@@ -2985,6 +2991,11 @@ type PodSpec struct {
 	// +optional
 	// This is a beta field and requires the IdentifyPodOS feature
 	OS *PodOS
+	// ResourceClaims defines which ResourceClaims must be allocated
+	// and reserved before the Pod is allowed to start. The resources
+	// will be made available to those containers which reference them
+	// by name.
+	ResourceClaims []PodResourceClaim
 }
 
 // OSName is the set of OS'es that can be used in OS.
@@ -5710,3 +5721,95 @@ type PortStatus struct {
 	// +kubebuilder:validation:MaxLength=316
 	Error *string
 }
+
+// PodResourceClaim references exactly one ResourceClaim, either by name or
+// by embedding a template for a ResourceClaim that will get created
+// by the resource claim controller in kube-controller-manager.
+type PodResourceClaim struct {
+	// A name under which this resource can be referenced by the containers.
+	Name string
+
+	// The resource is independent of the Pod and defined by
+	// a separate ResourceClaim in the same namespace as
+	// the Pod. Either this or Template must be set, but not both.
+	ResourceClaimName *string
+
+	// Will be used to create a stand-alone ResourceClaim to allocate the resource.
+	// The pod in which this PodResource is embedded will be the
+	// owner of the ResourceClaim, i.e. the ResourceClaim will be deleted together with the
+	// pod.  The name of the ResourceClaim will be `<pod name>-<resource name>` where
+	// `<resource name>` is the name PodResource.Name
+	// Pod validation will reject the pod if the concatenated name
+	// is not valid for a ResourceClaim (for example, too long).
+	//
+	// An existing ResourceClaim with that name that is not owned by the pod
+	// will *not* be used for the pod to avoid using an unrelated
+	// resource by mistake. Starting the pod is then blocked until
+	// the unrelated ResourceClaim is removed. If such a pre-created ResourceClaim is
+	// meant to be used by the pod, the ResourceClaim has to be updated with an
+	// owner reference to the pod once the pod exists. Normally
+	// this should not be necessary, but it may be useful when
+	// manually reconstructing a broken cluster.
+	//
+	// This field is read-only and no changes will be made by Kubernetes
+	// to the ResourceClaim after it has been created.
+	// Either this or ResourceClaimName must be set, but not both.
+	Template *ResourceClaimTemplate
+}
+
+// ResourceClaimTemplate is used to produce ResourceClaim objects by embedding
+// such a template in the ResourceRequirements of a Pod.
+type ResourceClaimTemplate struct {
+	// May contain labels and annotations that will be copied into the PVC
+	// when creating it. No other fields are allowed and will be rejected during
+	// validation.
+	//
+	// +optional
+	metav1.ObjectMeta
+
+	// The specification for the ResourceClaim. The entire content is
+	// copied unchanged into the PVC that gets created from this
+	// template. The same fields as in a ResourceClaim
+	// are also valid here.
+	Spec ResourceClaimSpec
+}
+
+// ResourceClaimSpec defines how a resource is to be allocated.
+type ResourceClaimSpec struct {
+	// ResourceClassName references the driver and additional parameters
+	// via the name of a ResourceClass that was created as part of the
+	// driver deployment.
+	//
+	// The apiserver does not check that the referenced class exists, but a
+	// driver-specific admission webhook may require that and is allowed to
+	// reject claims where the class is missing.
+	ResourceClassName string
+
+	// Parameters holds arbitrary values that will be available to the
+	// driver when allocating a resource for the claim.
+	Parameters runtime.RawExtension
+
+	// Allocation can start immediately or when a Pod wants to use the
+	// resource. Waiting for a Pod is the default.
+	AllocationMode AllocationMode
+}
+
+// AllocationMode describes whether a ResourceClaim gets allocated immediately
+// when it gets created (AllocationModeImmediate) or whether allocation is
+// delayed until it is needed for a Pod (AllocationModeDelayed). Other modes
+// might get added in the future.
+type AllocationMode string
+
+const (
+	// When a ResourceClaim has AllocationModeDelayed, allocation is
+	// delayed until a Pod gets scheduled that needs the ResourceClaim. The
+	// scheduler will consider all resource requirements of that Pod and
+	// trigger allocation for a node that fits the Pod.
+	AllocationModeDelayed AllocationMode = "Delayed"
+
+	// When a ResourceClaim has AllocationModeImmediate, allocation starts
+	// as soon as the ResourceClaim gets created. This is done without
+	// considering the needs of Pods that will use the ResourceClaim
+	// because those Pods are not known yet.
+	AllocationModeImmediate AllocationMode = "Immediate"
+)

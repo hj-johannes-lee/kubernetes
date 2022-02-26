@@ -36,6 +36,7 @@ import (
 	autoscalingapiv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	batchapiv1 "k8s.io/api/batch/v1"
 	batchapiv1beta1 "k8s.io/api/batch/v1beta1"
+	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
 	certificatesapiv1 "k8s.io/api/certificates/v1"
 	coordinationapiv1 "k8s.io/api/coordination/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -95,6 +96,7 @@ import (
 	authorizationrest "k8s.io/kubernetes/pkg/registry/authorization/rest"
 	autoscalingrest "k8s.io/kubernetes/pkg/registry/autoscaling/rest"
 	batchrest "k8s.io/kubernetes/pkg/registry/batch/rest"
+	cdirest "k8s.io/kubernetes/pkg/registry/cdi/rest"
 	certificatesrest "k8s.io/kubernetes/pkg/registry/certificates/rest"
 	coordinationrest "k8s.io/kubernetes/pkg/registry/coordination/rest"
 	corerest "k8s.io/kubernetes/pkg/registry/core/rest"
@@ -426,6 +428,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		appsrest.StorageProvider{},
 		admissionregistrationrest.RESTStorageProvider{},
 		eventsrest.RESTStorageProvider{TTL: c.ExtraConfig.EventTTL},
+		cdirest.RESTStorageProvider{},
 	}
 	if err := m.InstallAPIs(c.ExtraConfig.APIResourceConfigSource, c.GenericConfig.RESTOptionsGetter, restStorageProviders...); err != nil {
 		return nil, err
@@ -711,6 +714,7 @@ var (
 	// alphaAPIGroupVersionsDisabledByDefault holds the alpha APIs we have.  They are always disabled by default.
 	alphaAPIGroupVersionsDisabledByDefault = []schema.GroupVersion{
 		apiserverinternalv1alpha1.SchemeGroupVersion,
+		cdiv1alpha1.SchemeGroupVersion,
 		networkingapiv1alpha1.SchemeGroupVersion,
 		storageapiv1alpha1.SchemeGroupVersion,
 		flowcontrolv1alpha1.SchemeGroupVersion,
