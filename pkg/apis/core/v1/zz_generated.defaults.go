@@ -438,6 +438,12 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 		}
 	}
 	SetDefaults_ResourceList(&in.Spec.Overhead)
+	for i := range in.Spec.ResourceClaims {
+		a := &in.Spec.ResourceClaims[i]
+		if a.Template != nil {
+			SetDefaults_ResourceClaimSpec(&a.Template.Spec)
+		}
+	}
 }
 
 func SetObjectDefaults_PodList(in *v1.PodList) {
@@ -712,6 +718,12 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 		}
 	}
 	SetDefaults_ResourceList(&in.Template.Spec.Overhead)
+	for i := range in.Template.Spec.ResourceClaims {
+		a := &in.Template.Spec.ResourceClaims[i]
+		if a.Template != nil {
+			SetDefaults_ResourceClaimSpec(&a.Template.Spec)
+		}
+	}
 }
 
 func SetObjectDefaults_PodTemplateList(in *v1.PodTemplateList) {
@@ -988,6 +1000,12 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 			}
 		}
 		SetDefaults_ResourceList(&in.Spec.Template.Spec.Overhead)
+		for i := range in.Spec.Template.Spec.ResourceClaims {
+			a := &in.Spec.Template.Spec.ResourceClaims[i]
+			if a.Template != nil {
+				SetDefaults_ResourceClaimSpec(&a.Template.Spec)
+			}
+		}
 	}
 }
 

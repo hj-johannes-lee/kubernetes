@@ -39,6 +39,7 @@ import (
 	autoscalingv2beta2 "k8s.io/client-go/kubernetes/typed/autoscaling/v2beta2"
 	batchv1 "k8s.io/client-go/kubernetes/typed/batch/v1"
 	batchv1beta1 "k8s.io/client-go/kubernetes/typed/batch/v1beta1"
+	cdiv1alpha1 "k8s.io/client-go/kubernetes/typed/cdi/v1alpha1"
 	certificatesv1 "k8s.io/client-go/kubernetes/typed/certificates/v1"
 	certificatesv1beta1 "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
@@ -91,6 +92,7 @@ type Interface interface {
 	AutoscalingV2beta2() autoscalingv2beta2.AutoscalingV2beta2Interface
 	BatchV1() batchv1.BatchV1Interface
 	BatchV1beta1() batchv1beta1.BatchV1beta1Interface
+	CdiV1alpha1() cdiv1alpha1.CdiV1alpha1Interface
 	CertificatesV1() certificatesv1.CertificatesV1Interface
 	CertificatesV1beta1() certificatesv1beta1.CertificatesV1beta1Interface
 	CoordinationV1beta1() coordinationv1beta1.CoordinationV1beta1Interface
@@ -143,6 +145,7 @@ type Clientset struct {
 	autoscalingV2beta2           *autoscalingv2beta2.AutoscalingV2beta2Client
 	batchV1                      *batchv1.BatchV1Client
 	batchV1beta1                 *batchv1beta1.BatchV1beta1Client
+	cdiV1alpha1                  *cdiv1alpha1.CdiV1alpha1Client
 	certificatesV1               *certificatesv1.CertificatesV1Client
 	certificatesV1beta1          *certificatesv1beta1.CertificatesV1beta1Client
 	coordinationV1beta1          *coordinationv1beta1.CoordinationV1beta1Client
@@ -253,6 +256,11 @@ func (c *Clientset) BatchV1() batchv1.BatchV1Interface {
 // BatchV1beta1 retrieves the BatchV1beta1Client
 func (c *Clientset) BatchV1beta1() batchv1beta1.BatchV1beta1Interface {
 	return c.batchV1beta1
+}
+
+// CdiV1alpha1 retrieves the CdiV1alpha1Client
+func (c *Clientset) CdiV1alpha1() cdiv1alpha1.CdiV1alpha1Interface {
+	return c.cdiV1alpha1
 }
 
 // CertificatesV1 retrieves the CertificatesV1Client
@@ -513,6 +521,10 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
+	cs.cdiV1alpha1, err = cdiv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err != nil {
+		return nil, err
+	}
 	cs.certificatesV1, err = certificatesv1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
@@ -670,6 +682,7 @@ func New(c rest.Interface) *Clientset {
 	cs.autoscalingV2beta2 = autoscalingv2beta2.New(c)
 	cs.batchV1 = batchv1.New(c)
 	cs.batchV1beta1 = batchv1beta1.New(c)
+	cs.cdiV1alpha1 = cdiv1alpha1.New(c)
 	cs.certificatesV1 = certificatesv1.New(c)
 	cs.certificatesV1beta1 = certificatesv1beta1.New(c)
 	cs.coordinationV1beta1 = coordinationv1beta1.New(c)

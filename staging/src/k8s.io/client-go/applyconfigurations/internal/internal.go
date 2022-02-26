@@ -3189,6 +3189,125 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.api.batch.v1.JobSpec
       default: {}
+- name: io.k8s.api.cdi.v1alpha1.AllocationResult
+  map:
+    fields:
+    - name: attributes
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: availableOnNodes
+      type:
+        namedType: io.k8s.api.core.v1.NodeSelector
+    - name: userLimit
+      type:
+        scalar: numeric
+- name: io.k8s.api.cdi.v1alpha1.DriverSchedulingStatus
+  map:
+    fields:
+    - name: suitableNodes
+      type:
+        namedType: io.k8s.api.core.v1.NodeSelector
+    - name: unsuitableNodes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+- name: io.k8s.api.cdi.v1alpha1.ResourceClaim
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: io.k8s.api.core.v1.ResourceClaimSpec
+      default: {}
+    - name: status
+      type:
+        namedType: io.k8s.api.cdi.v1alpha1.ResourceClaimStatus
+      default: {}
+- name: io.k8s.api.cdi.v1alpha1.ResourceClaimStatus
+  map:
+    fields:
+    - name: allocation
+      type:
+        namedType: io.k8s.api.cdi.v1alpha1.AllocationResult
+      default: {}
+    - name: driverName
+      type:
+        scalar: string
+    - name: phase
+      type:
+        scalar: string
+    - name: reservedFor
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+          elementRelationship: associative
+    - name: scheduling
+      type:
+        namedType: io.k8s.api.cdi.v1alpha1.SchedulingStatus
+      default: {}
+    - name: usedOnNodes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+- name: io.k8s.api.cdi.v1alpha1.ResourceClass
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: driverName
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: parameters
+      type:
+        namedType: __untyped_atomic_
+      default: {}
+- name: io.k8s.api.cdi.v1alpha1.SchedulerSchedulingStatus
+  map:
+    fields:
+    - name: potentialNodes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+    - name: selectedNode
+      type:
+        scalar: string
+- name: io.k8s.api.cdi.v1alpha1.SchedulingStatus
+  map:
+    fields:
+    - name: driver
+      type:
+        namedType: io.k8s.api.cdi.v1alpha1.DriverSchedulingStatus
+      default: {}
+    - name: scheduler
+      type:
+        namedType: io.k8s.api.cdi.v1alpha1.SchedulerSchedulingStatus
+      default: {}
 - name: io.k8s.api.certificates.v1.CertificateSigningRequest
   map:
     fields:
@@ -5666,6 +5785,18 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: string
       default: ""
+- name: io.k8s.api.core.v1.PodResourceClaim
+  map:
+    fields:
+    - name: name
+      type:
+        scalar: string
+    - name: resourceClaimName
+      type:
+        scalar: string
+    - name: template
+      type:
+        namedType: io.k8s.api.core.v1.ResourceClaimTemplate
 - name: io.k8s.api.core.v1.PodSecurityContext
   map:
     fields:
@@ -5810,6 +5941,14 @@ var schemaYAML = typed.YAMLObject(`types:
           elementType:
             namedType: io.k8s.api.core.v1.PodReadinessGate
           elementRelationship: atomic
+    - name: resourceClaims
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.core.v1.PodResourceClaim
+          elementRelationship: associative
+          keys:
+          - name
     - name: restartPolicy
       type:
         scalar: string
@@ -6207,6 +6346,31 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: numeric
       default: 0
+- name: io.k8s.api.core.v1.ResourceClaimSpec
+  map:
+    fields:
+    - name: allocationMode
+      type:
+        scalar: string
+    - name: parameters
+      type:
+        namedType: __untyped_atomic_
+      default: {}
+    - name: resourceClassName
+      type:
+        scalar: string
+      default: ""
+- name: io.k8s.api.core.v1.ResourceClaimTemplate
+  map:
+    fields:
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: io.k8s.api.core.v1.ResourceClaimSpec
+      default: {}
 - name: io.k8s.api.core.v1.ResourceFieldSelector
   map:
     fields:
@@ -6276,6 +6440,12 @@ var schemaYAML = typed.YAMLObject(`types:
 - name: io.k8s.api.core.v1.ResourceRequirements
   map:
     fields:
+    - name: claims
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
     - name: limits
       type:
         map:

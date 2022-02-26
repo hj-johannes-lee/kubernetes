@@ -1605,6 +1605,17 @@ func (PodReadinessGate) SwaggerDoc() map[string]string {
 	return map_PodReadinessGate
 }
 
+var map_PodResourceClaim = map[string]string{
+	"":                  "PodResourceClaim references exactly one ResourceClaim, either by name or by embedding a template for a ResourceClaim that will get created by the resource claim controller in kube-controller-manager.",
+	"name":              "A name under which this resource can be referenced by the containers.",
+	"resourceClaimName": "The resource is independent of the Pod and defined by a separate ResourceClaim in the same namespace as the Pod. Either this or Template must be set, but not both.",
+	"template":          "Will be used to create a stand-alone ResourceClaim to allocate the resource. The pod in which this PodResource is embedded will be the owner of the ResourceClaim, i.e. the ResourceClaim will be deleted together with the pod.  The name of the ResourceClaim will be `<pod name>-<resource name>` where `<resource name>` is the name PodResource.Name Pod validation will reject the pod if the concatenated name is not valid for a ResourceClaim (for example, too long).\n\nAn existing ResourceClaim with that name that is not owned by the pod will *not* be used for the pod to avoid using an unrelated resource by mistake. Starting the pod is then blocked until the unrelated ResourceClaim is removed. If such a pre-created ResourceClaim is meant to be used by the pod, the ResourceClaim has to be updated with an owner reference to the pod once the pod exists. Normally this should not be necessary, but it may be useful when manually reconstructing a broken cluster.\n\nThis field is read-only and no changes will be made by Kubernetes to the ResourceClaim after it has been created. Either this or ResourceClaimName must be set, but not both.",
+}
+
+func (PodResourceClaim) SwaggerDoc() map[string]string {
+	return map_PodResourceClaim
+}
+
 var map_PodSecurityContext = map[string]string{
 	"":                    "PodSecurityContext holds pod-level security attributes and common container settings. Some fields are also present in container.securityContext.  Field values of container.securityContext take precedence over field values of PodSecurityContext.",
 	"seLinuxOptions":      "The SELinux context to be applied to all containers. If unspecified, the container runtime will allocate a random SELinux context for each container.  May also be set in SecurityContext.  If set in both SecurityContext and PodSecurityContext, the value specified in SecurityContext takes precedence for that container. Note that this field cannot be set when spec.os.name is windows.",
@@ -1670,6 +1681,7 @@ var map_PodSpec = map[string]string{
 	"topologySpreadConstraints":     "TopologySpreadConstraints describes how a group of pods ought to spread across topology domains. Scheduler will schedule pods in a way which abides by the constraints. All topologySpreadConstraints are ANDed.",
 	"setHostnameAsFQDN":             "If true the pod's hostname will be configured as the pod's FQDN, rather than the leaf name (the default). In Linux containers, this means setting the FQDN in the hostname field of the kernel (the nodename field of struct utsname). In Windows containers, this means setting the registry value of hostname for the registry key HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters to FQDN. If a pod does not have FQDN, this has no effect. Default to false.",
 	"os":                            "Specifies the OS of the containers in the pod. Some pod and container fields are restricted if this is set.\n\nIf the OS field is set to linux, the following fields must be unset: -securityContext.windowsOptions\n\nIf the OS field is set to windows, following fields must be unset: - spec.hostPID - spec.hostIPC - spec.securityContext.seLinuxOptions - spec.securityContext.seccompProfile - spec.securityContext.fsGroup - spec.securityContext.fsGroupChangePolicy - spec.securityContext.sysctls - spec.shareProcessNamespace - spec.securityContext.runAsUser - spec.securityContext.runAsGroup - spec.securityContext.supplementalGroups - spec.containers[*].securityContext.seLinuxOptions - spec.containers[*].securityContext.seccompProfile - spec.containers[*].securityContext.capabilities - spec.containers[*].securityContext.readOnlyRootFilesystem - spec.containers[*].securityContext.privileged - spec.containers[*].securityContext.allowPrivilegeEscalation - spec.containers[*].securityContext.procMount - spec.containers[*].securityContext.runAsUser - spec.containers[*].securityContext.runAsGroup This is a beta field and requires the IdentifyPodOS feature",
+	"resourceClaims":                "ResourceClaims defines which ResourceClaims must be allocated and reserved before the Pod is allowed to start. The resources will be made available to those containers which reference them by name.",
 }
 
 func (PodSpec) SwaggerDoc() map[string]string {
@@ -1942,6 +1954,27 @@ func (ReplicationControllerStatus) SwaggerDoc() map[string]string {
 	return map_ReplicationControllerStatus
 }
 
+var map_ResourceClaimSpec = map[string]string{
+	"":                  "ResourceClaimSpec defines how a resource is to be allocated.",
+	"resourceClassName": "ResourceClassName references the driver and additional parameters via the name of a ResourceClass that was created as part of the driver deployment.\n\nThe apiserver does not check that the referenced class exists, but a driver-specific admission webhook may require that and is allowed to reject claims where the class is missing.",
+	"parameters":        "Parameters holds arbitrary values that will be available to the driver when allocating a resource for the claim.",
+	"allocationMode":    "Allocation can start immediately or when a Pod wants to use the resource. Waiting for a Pod is the default.",
+}
+
+func (ResourceClaimSpec) SwaggerDoc() map[string]string {
+	return map_ResourceClaimSpec
+}
+
+var map_ResourceClaimTemplate = map[string]string{
+	"":         "ResourceClaimTemplate is used to produce ResourceClaim objects by embedding such a template in the ResourceRequirements of a Pod.",
+	"metadata": "May contain labels and annotations that will be copied into the PVC when creating it. No other fields are allowed and will be rejected during validation.",
+	"spec":     "The specification for the ResourceClaim. The entire content is copied unchanged into the PVC that gets created from this template. The same fields as in a ResourceClaim are also valid here.",
+}
+
+func (ResourceClaimTemplate) SwaggerDoc() map[string]string {
+	return map_ResourceClaimTemplate
+}
+
 var map_ResourceFieldSelector = map[string]string{
 	"":              "ResourceFieldSelector represents container resources (cpu, memory) and their output format",
 	"containerName": "Container name: required for volumes, optional for env vars",
@@ -1999,6 +2032,7 @@ var map_ResourceRequirements = map[string]string{
 	"":         "ResourceRequirements describes the compute resource requirements.",
 	"limits":   "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
 	"requests": "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+	"claims":   "The entries are the names of resources in PodSpec.ResourceClaims that are used by the container.",
 }
 
 func (ResourceRequirements) SwaggerDoc() map[string]string {

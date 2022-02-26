@@ -17,7 +17,6 @@ limitations under the License.
 package validation
 
 import (
-	"bytes"
 	"strings"
 
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
@@ -46,7 +45,7 @@ func ValidateResourceClassUpdate(resourceClass, oldResourceClass *cdi.ResourceCl
 // ValidateResourceClaim validates a ResourceClaim.
 func ValidateResourceClaim(resourceClaim *cdi.ResourceClaim) field.ErrorList {
 	allErrs := corevalidation.ValidateObjectMeta(&resourceClaim.ObjectMeta, true, validateClaimName, field.NewPath("metadata"))
-	allErrs = append(allErrs, validateResourceClaimSpec(&resourceClaim.Spec, field.NewPath("spec"))...)
+	allErrs = append(allErrs, corevalidation.ValidateResourceClaimSpec(&resourceClaim.Spec, field.NewPath("spec"))...)
 	allErrs = append(allErrs, validateResourceClaimStatus(&resourceClaim.Status, field.NewPath("status"))...)
 	return allErrs
 }
@@ -54,7 +53,7 @@ func ValidateResourceClaim(resourceClaim *cdi.ResourceClaim) field.ErrorList {
 // ValidateResourceClaimUpdate tests if an update to ResourceClaim is valid.
 func ValidateResourceClaimUpdate(resourceClaim, oldResourceClaim *cdi.ResourceClaim) field.ErrorList {
 	allErrs := corevalidation.ValidateObjectMetaUpdate(&resourceClaim.ObjectMeta, &oldResourceClaim.ObjectMeta, field.NewPath("metadata"))
-	allErrs = append(allErrs, validateResourceClaimSpecUnmodified(&resourceClaim.Spec, &oldResourceClaim.Spec, field.NewPath("spec"))...)
+	allErrs = append(allErrs, corevalidation.ValidateResourceClaimSpecUnmodified(&resourceClaim.Spec, &oldResourceClaim.Spec, field.NewPath("spec"))...)
 	allErrs = append(allErrs, ValidateResourceClaim(resourceClaim)...)
 	return allErrs
 }
@@ -62,28 +61,6 @@ func ValidateResourceClaimUpdate(resourceClaim, oldResourceClaim *cdi.ResourceCl
 // ValidateResourceClaimStatusUpdate tests if an update to the status of a ResourceClaim is valid.
 func ValidateResourceClaimStatusUpdate(resourceClaim, oldResourceClaim *cdi.ResourceClaim) field.ErrorList {
 	allErrs := corevalidation.ValidateObjectMetaUpdate(&resourceClaim.ObjectMeta, &oldResourceClaim.ObjectMeta, field.NewPath("metadata"))
-	return allErrs
-}
-
-func validateResourceClaimSpec(spec *cdi.ResourceClaimSpec, fldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	for _, msg := range corevalidation.ValidateClassName(spec.ResourceClassName, false) {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("resourceClassName"), spec.ResourceClassName, msg))
-	}
-	return allErrs
-}
-
-func validateResourceClaimSpecUnmodified(spec, oldSpec *cdi.ResourceClaimSpec, fldPath *field.Path) field.ErrorList {
-	allErrs := field.ErrorList{}
-	if spec.ResourceClassName != oldSpec.ResourceClassName {
-		allErrs = append(allErrs, field.Forbidden(fldPath.Child("resourceClassName"), "updates are forbidden"))
-	}
-	if bytes.Compare(spec.Parameters.Raw, oldSpec.Parameters.Raw) != 0 {
-		allErrs = append(allErrs, field.Forbidden(fldPath.Child("parameters"), "updates are forbidden"))
-	}
-	if spec.AllocationMode != oldSpec.AllocationMode {
-		allErrs = append(allErrs, field.Forbidden(fldPath.Child("allocationMode"), "updates are forbidden"))
-	}
 	return allErrs
 }
 
