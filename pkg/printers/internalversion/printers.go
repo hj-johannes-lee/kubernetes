@@ -31,6 +31,7 @@ import (
 	autoscalingv2beta1 "k8s.io/api/autoscaling/v2beta1"
 	batchv1 "k8s.io/api/batch/v1"
 	batchv1beta1 "k8s.io/api/batch/v1beta1"
+	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -54,6 +55,7 @@ import (
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/autoscaling"
 	"k8s.io/kubernetes/pkg/apis/batch"
+	"k8s.io/kubernetes/pkg/apis/cdi"
 	"k8s.io/kubernetes/pkg/apis/certificates"
 	"k8s.io/kubernetes/pkg/apis/coordination"
 	api "k8s.io/kubernetes/pkg/apis/core"
@@ -604,6 +606,24 @@ func AddHandlers(h printers.PrintHandler) {
 
 	h.TableHandler(clusterCIDRConfigColumnDefinitions, printClusterCIDRConfig)
 	h.TableHandler(clusterCIDRConfigColumnDefinitions, printClusterCIDRConfigList)
+
+	resourceClassColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "DriverName", Type: "string", Description: cdiv1alpha1.ResourceClass{}.SwaggerDoc()["driverName"]},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+	}
+	h.TableHandler(resourceClassColumnDefinitions, printResourceClass)
+	h.TableHandler(resourceClassColumnDefinitions, printResourceClassList)
+
+	resourceClaimColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "ClassName", Type: "string", Description: apiv1.ResourceClaimSpec{}.SwaggerDoc()["resourceClassName"]},
+		{Name: "AllocationMode", Type: "string", Description: apiv1.ResourceClaimSpec{}.SwaggerDoc()["allocationMode"]},
+		{Name: "Phase", Type: "string", Description: cdiv1alpha1.ResourceClaimStatus{}.SwaggerDoc()["phase"]},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+	}
+	h.TableHandler(resourceClaimColumnDefinitions, printResourceClaim)
+	h.TableHandler(resourceClaimColumnDefinitions, printResourceClaimList)
 }
 
 // Pass ports=nil for all ports.
@@ -2694,6 +2714,48 @@ func printScale(obj *autoscaling.Scale, options printers.GenerateOptions) ([]met
 	}
 	row.Cells = append(row.Cells, obj.Name, obj.Spec.Replicas, obj.Status.Replicas, translateTimestampSince(obj.CreationTimestamp))
 	return []metav1.TableRow{row}, nil
+}
+
+func printResourceClass(obj *cdi.ResourceClass, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+	row.Cells = append(row.Cells, obj.Name, obj.DriverName, translateTimestampSince(obj.CreationTimestamp))
+
+	return []metav1.TableRow{row}, nil
+}
+
+func printResourceClassList(list *cdi.ResourceClassList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printResourceClass(&list.Items[i], options)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
+func printResourceClaim(obj *cdi.ResourceClaim, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+	row.Cells = append(row.Cells, obj.Name, obj.Spec.ResourceClassName, string(obj.Spec.AllocationMode), string(obj.Status.Phase), translateTimestampSince(obj.CreationTimestamp))
+
+	return []metav1.TableRow{row}, nil
+}
+
+func printResourceClaimList(list *cdi.ResourceClaimList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printResourceClaim(&list.Items[i], options)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
 }
 
 func printBoolPtr(value *bool) string {
