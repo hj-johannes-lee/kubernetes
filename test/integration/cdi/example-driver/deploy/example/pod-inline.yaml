@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pause
+  labels:
+    name: pause
+spec:
+  containers:
+  - name: pause
+    image: "k8s.gcr.io/pause:3.6"
+    resources:
+      claims:
+      - resource
+  resourceClaims:
+  - name: resource
+    template:
+      metadata:
+        labels:
+          app: inline-resource
+      spec:
+        resourceClassName: example
+        parameters:
+          a: b

@@ -1,0 +1,10 @@
+apiVersion: cdi.k8s.io/v1alpha1
+kind: ResourceClaim
+metadata:
+  name: example
+  namespace: default
+spec:
+  allocationMode: Immediate
+  resourceClassName: example
+  parameters:
+    a: b
