@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ephemeral
+package resourceclaim
 
 import (
 	"context"
@@ -22,11 +22,10 @@ import (
 	"sort"
 	"testing"
 
+	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
 	v1 "k8s.io/api/core/v1"
-	// storagev1 "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	// "k8s.io/apimachinery/pkg/types"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -37,23 +36,23 @@ import (
 	"k8s.io/component-base/metrics/testutil"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/controller"
-	ephemeralvolumemetrics "k8s.io/kubernetes/pkg/controller/volume/ephemeral/metrics"
+	ephemeralvolumemetrics "k8s.io/kubernetes/pkg/controller/resourceclaim/metrics"
 
 	"github.com/stretchr/testify/assert"
 )
 
 var (
-	testPodName         = "test-pod"
-	testNamespace       = "my-namespace"
-	testPodUID          = types.UID("uidpod1")
-	otherNamespace      = "not-my-namespace"
-	ephemeralVolumeName = "ephemeral-volume"
+	testPodName          = "test-pod"
+	testNamespace        = "my-namespace"
+	testPodUID           = types.UID("uidpod1")
+	otherNamespace       = "not-my-namespace"
+	podResourceClaimName = "acme-resource"
 
-	testPod               = makePod(testPodName, testNamespace, testPodUID)
-	testPodWithEphemeral  = makePod(testPodName, testNamespace, testPodUID, *makeEphemeralVolume(ephemeralVolumeName))
-	testPodEphemeralClaim = makePVC(testPodName+"-"+ephemeralVolumeName, testNamespace, makeOwnerReference(testPodWithEphemeral, true))
-	conflictingClaim      = makePVC(testPodName+"-"+ephemeralVolumeName, testNamespace, nil)
-	otherNamespaceClaim   = makePVC(testPodName+"-"+ephemeralVolumeName, otherNamespace, nil)
+	testPod             = makePod(testPodName, testNamespace, testPodUID)
+	testPodWithResource = makePod(testPodName, testNamespace, testPodUID, *makePodResourceClaim(podResourceClaimName))
+	testClaim           = makeClaim(testPodName+"-"+podResourceClaimName, testNamespace, makeOwnerReference(testPodWithResource, true))
+	conflictingClaim    = makeClaim(testPodName+"-"+podResourceClaimName, testNamespace, nil)
+	otherNamespaceClaim = makeClaim(testPodName+"-"+podResourceClaimName, otherNamespace, nil)
 )
 
 func init() {
@@ -64,32 +63,32 @@ func TestSyncHandler(t *testing.T) {
 	tests := []struct {
 		name            string
 		podKey          string
-		pvcs            []*v1.PersistentVolumeClaim
+		claims          []*cdiv1alpha1.ResourceClaim
 		pods            []*v1.Pod
-		expectedPVCs    []v1.PersistentVolumeClaim
+		expectedClaims  []cdiv1alpha1.ResourceClaim
 		expectedError   bool
 		expectedMetrics expectedMetrics
 	}{
 		{
 			name:            "create",
-			pods:            []*v1.Pod{testPodWithEphemeral},
-			podKey:          podKey(testPodWithEphemeral),
-			expectedPVCs:    []v1.PersistentVolumeClaim{*testPodEphemeralClaim},
+			pods:            []*v1.Pod{testPodWithResource},
+			podKey:          podKey(testPodWithResource),
+			expectedClaims:  []cdiv1alpha1.ResourceClaim{*testClaim},
 			expectedMetrics: expectedMetrics{1, 0},
 		},
 		{
 			name:   "no-such-pod",
-			podKey: podKey(testPodWithEphemeral),
+			podKey: podKey(testPodWithResource),
 		},
 		{
 			name: "pod-deleted",
 			pods: func() []*v1.Pod {
 				deleted := metav1.Now()
-				pods := []*v1.Pod{testPodWithEphemeral.DeepCopy()}
+				pods := []*v1.Pod{testPodWithResource.DeepCopy()}
 				pods[0].DeletionTimestamp = &deleted
 				return pods
 			}(),
-			podKey: podKey(testPodWithEphemeral),
+			podKey: podKey(testPodWithResource),
 		},
 		{
 			name:   "no-volumes",
@@ -97,25 +96,25 @@ func TestSyncHandler(t *testing.T) {
 			podKey: podKey(testPod),
 		},
 		{
-			name:            "create-with-other-PVC",
-			pods:            []*v1.Pod{testPodWithEphemeral},
-			podKey:          podKey(testPodWithEphemeral),
-			pvcs:            []*v1.PersistentVolumeClaim{otherNamespaceClaim},
-			expectedPVCs:    []v1.PersistentVolumeClaim{*otherNamespaceClaim, *testPodEphemeralClaim},
+			name:            "create-with-other-claim",
+			pods:            []*v1.Pod{testPodWithResource},
+			podKey:          podKey(testPodWithResource),
+			claims:          []*cdiv1alpha1.ResourceClaim{otherNamespaceClaim},
+			expectedClaims:  []cdiv1alpha1.ResourceClaim{*otherNamespaceClaim, *testClaim},
 			expectedMetrics: expectedMetrics{1, 0},
 		},
 		{
-			name:          "wrong-PVC-owner",
-			pods:          []*v1.Pod{testPodWithEphemeral},
-			podKey:        podKey(testPodWithEphemeral),
-			pvcs:          []*v1.PersistentVolumeClaim{conflictingClaim},
-			expectedPVCs:  []v1.PersistentVolumeClaim{*conflictingClaim},
-			expectedError: true,
+			name:           "wrong-claim-owner",
+			pods:           []*v1.Pod{testPodWithResource},
+			podKey:         podKey(testPodWithResource),
+			claims:         []*cdiv1alpha1.ResourceClaim{conflictingClaim},
+			expectedClaims: []cdiv1alpha1.ResourceClaim{*conflictingClaim},
+			expectedError:  true,
 		},
 		{
 			name:            "create-conflict",
-			pods:            []*v1.Pod{testPodWithEphemeral},
-			podKey:          podKey(testPodWithEphemeral),
+			pods:            []*v1.Pod{testPodWithResource},
+			podKey:          podKey(testPodWithResource),
 			expectedMetrics: expectedMetrics{1, 1},
 			expectedError:   true,
 		},
@@ -134,31 +133,31 @@ func TestSyncHandler(t *testing.T) {
 			for _, pod := range tc.pods {
 				objects = append(objects, pod)
 			}
-			for _, pvc := range tc.pvcs {
-				objects = append(objects, pvc)
+			for _, claim := range tc.claims {
+				objects = append(objects, claim)
 			}
 
 			fakeKubeClient := createTestClient(objects...)
 			if tc.expectedMetrics.numFailures > 0 {
-				fakeKubeClient.PrependReactor("create", "persistentvolumeclaims", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+				fakeKubeClient.PrependReactor("create", "resourceclaims", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 					return true, nil, apierrors.NewConflict(action.GetResource().GroupResource(), "fake name", errors.New("fake conflict"))
 				})
 			}
 			setupMetrics()
 			informerFactory := informers.NewSharedInformerFactory(fakeKubeClient, controller.NoResyncPeriodFunc())
 			podInformer := informerFactory.Core().V1().Pods()
-			pvcInformer := informerFactory.Core().V1().PersistentVolumeClaims()
+			claimInformer := informerFactory.Cdi().V1alpha1().ResourceClaims()
 
-			c, err := NewController(fakeKubeClient, podInformer, pvcInformer)
+			c, err := NewController(fakeKubeClient, podInformer, claimInformer)
 			if err != nil {
 				t.Fatalf("error creating ephemeral controller : %v", err)
 			}
-			ec, _ := c.(*ephemeralController)
+			ec, _ := c.(*resourceClaimController)
 
 			// Ensure informers are up-to-date.
 			go informerFactory.Start(ctx.Done())
 			informerFactory.WaitForCacheSync(ctx.Done())
-			cache.WaitForCacheSync(ctx.Done(), podInformer.Informer().HasSynced, pvcInformer.Informer().HasSynced)
+			cache.WaitForCacheSync(ctx.Done(), podInformer.Informer().HasSynced, claimInformer.Informer().HasSynced)
 
 			err = ec.syncHandler(context.TODO(), tc.podKey)
 			if err != nil && !tc.expectedError {
@@ -168,52 +167,47 @@ func TestSyncHandler(t *testing.T) {
 				t.Fatalf("unexpected success")
 			}
 
-			pvcs, err := fakeKubeClient.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
+			claims, err := fakeKubeClient.CdiV1alpha1().ResourceClaims("").List(ctx, metav1.ListOptions{})
 			if err != nil {
-				t.Fatalf("unexpected error while listing PVCs: %v", err)
+				t.Fatalf("unexpected error while listing claims: %v", err)
 			}
-			assert.Equal(t, sortPVCs(tc.expectedPVCs), sortPVCs(pvcs.Items))
+			assert.Equal(t, sortClaims(tc.expectedClaims), sortClaims(claims.Items))
 			expectMetrics(t, tc.expectedMetrics)
 		})
 	}
 }
 
-func makePVC(name, namespace string, owner *metav1.OwnerReference) *v1.PersistentVolumeClaim {
-	pvc := &v1.PersistentVolumeClaim{
+func makeClaim(name, namespace string, owner *metav1.OwnerReference) *cdiv1alpha1.ResourceClaim {
+	claim := &cdiv1alpha1.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       v1.PersistentVolumeClaimSpec{},
 	}
 	if owner != nil {
-		pvc.OwnerReferences = []metav1.OwnerReference{*owner}
+		claim.OwnerReferences = []metav1.OwnerReference{*owner}
 	}
 
-	return pvc
+	return claim
 }
 
-func makeEphemeralVolume(name string) *v1.Volume {
-	return &v1.Volume{
-		Name: name,
-		VolumeSource: v1.VolumeSource{
-			Ephemeral: &v1.EphemeralVolumeSource{
-				VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{},
-			},
-		},
+func makePodResourceClaim(name string) *v1.PodResourceClaim {
+	return &v1.PodResourceClaim{
+		Name:     name,
+		Template: &v1.ResourceClaimTemplate{},
 	}
 }
 
-func makePod(name, namespace string, uid types.UID, volumes ...v1.Volume) *v1.Pod {
-	pvc := &v1.Pod{
+func makePod(name, namespace string, uid types.UID, podClaims ...v1.PodResourceClaim) *v1.Pod {
+	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: uid},
 		Spec: v1.PodSpec{
-			Volumes: volumes,
+			ResourceClaims: podClaims,
 		},
 	}
 
-	return pvc
+	return pod
 }
 
 func podKey(pod *v1.Pod) string {
-	key, _ := kcache.DeletionHandlingMetaNamespaceKeyFunc(testPodWithEphemeral)
+	key, _ := kcache.DeletionHandlingMetaNamespaceKeyFunc(pod)
 	return key
 }
 
@@ -229,12 +223,12 @@ func makeOwnerReference(pod *v1.Pod, isController bool) *metav1.OwnerReference {
 	}
 }
 
-func sortPVCs(pvcs []v1.PersistentVolumeClaim) []v1.PersistentVolumeClaim {
-	sort.Slice(pvcs, func(i, j int) bool {
-		return pvcs[i].Namespace < pvcs[j].Namespace ||
-			pvcs[i].Name < pvcs[j].Name
+func sortClaims(claims []cdiv1alpha1.ResourceClaim) []cdiv1alpha1.ResourceClaim {
+	sort.Slice(claims, func(i, j int) bool {
+		return claims[i].Namespace < claims[j].Namespace ||
+			claims[i].Name < claims[j].Name
 	})
-	return pvcs
+	return claims
 }
 
 func createTestClient(objects ...runtime.Object) *fake.Clientset {
@@ -252,15 +246,15 @@ type expectedMetrics struct {
 func expectMetrics(t *testing.T, em expectedMetrics) {
 	t.Helper()
 
-	actualCreated, err := testutil.GetCounterMetricValue(ephemeralvolumemetrics.EphemeralVolumeCreateAttempts)
-	handleErr(t, err, "ephemeralVolumeCreate")
+	actualCreated, err := testutil.GetCounterMetricValue(ephemeralvolumemetrics.ResourceClaimCreateAttempts)
+	handleErr(t, err, "ResourceClaimCreate")
 	if actualCreated != float64(em.numCreated) {
-		t.Errorf("Expected PVCs to be created %d, got %v", em.numCreated, actualCreated)
+		t.Errorf("Expected claims to be created %d, got %v", em.numCreated, actualCreated)
 	}
-	actualConflicts, err := testutil.GetCounterMetricValue(ephemeralvolumemetrics.EphemeralVolumeCreateFailures)
-	handleErr(t, err, "ephemeralVolumeCreate/Conflict")
+	actualConflicts, err := testutil.GetCounterMetricValue(ephemeralvolumemetrics.ResourceClaimCreateFailures)
+	handleErr(t, err, "ResourceClaimCreate/Conflict")
 	if actualConflicts != float64(em.numFailures) {
-		t.Errorf("Expected PVCs to have conflicts %d, got %v", em.numFailures, actualConflicts)
+		t.Errorf("Expected claims to have conflicts %d, got %v", em.numFailures, actualConflicts)
 	}
 }
 
@@ -272,6 +266,6 @@ func handleErr(t *testing.T, err error, metricName string) {
 
 func setupMetrics() {
 	ephemeralvolumemetrics.RegisterMetrics()
-	ephemeralvolumemetrics.EphemeralVolumeCreateAttempts.Reset()
-	ephemeralvolumemetrics.EphemeralVolumeCreateFailures.Reset()
+	ephemeralvolumemetrics.ResourceClaimCreateAttempts.Reset()
+	ephemeralvolumemetrics.ResourceClaimCreateFailures.Reset()
 }
