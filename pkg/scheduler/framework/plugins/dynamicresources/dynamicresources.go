@@ -59,6 +59,10 @@ type stateData struct {
 	// Empty if the Pod has no claims.
 	claims []*cdiv1alpha1.ResourceClaim
 
+	// A copy of all nodes that fit the Pod. Set by PreScore,
+	// used by Reserve.
+	potentialNodes []*v1.Node
+
 	// The indices of all claims that:
 	// - are allocated
 	// - use delayed allocation
@@ -347,8 +351,12 @@ func (pl *dynamicResources) PostFilter(ctx context.Context, cs *framework.CycleS
 }
 
 // PreScore is passed a list of all nodes that would fit the pod. Not all
-// claims are necessarily allocated yet, so here we can set the SuitableNodes
-// field for those which are pending.
+// claims are necessarily allocated yet. We could set PotentialNodes here, but
+// then the claim might might updated twice during one cycle (here for
+// PotentialNodes, in Reserve for SelectedNode). We can optimize that and set
+// SelectedNode and PotentialNodes in one update operation in Reserve by
+// remembering the node list in our state.  We are guaranteed to reach Reserve
+// because we have node candidates.
 func (pl *dynamicResources) PreScore(ctx context.Context, cs *framework.CycleState, pod *v1.Pod, nodes []*v1.Node) *framework.Status {
 	state, err := getStateData(cs)
 	if err != nil {
@@ -358,30 +366,7 @@ func (pl *dynamicResources) PreScore(ctx context.Context, cs *framework.CycleSta
 		return nil
 	}
 
-	logger := klog.FromContext(ctx)
-	for index, claim := range state.claims {
-		if claim.Status.Phase == cdiv1alpha1.ResourceClaimPending {
-			// Must be delayed allocation. We change the
-			// SuitableNodes field if some new node became a
-			// candidate. This means the list may contain nodes
-			// that are not actually viable candidates right now,
-			// but it's okay to not remove them and it may help to
-			// avoid apiserver traffic.
-			if haveAllNodes(claim.Status.Scheduling.Scheduler.PotentialNodes, nodes) {
-				logger.V(5).Info("no need to update potential nodes", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "potentialnodes", nodes)
-				continue
-			}
-			claim := claim.DeepCopy()
-			claim.Status.Scheduling.Scheduler.PotentialNodes = make([]string, 0, len(nodes))
-			for _, node := range nodes {
-				claim.Status.Scheduling.Scheduler.PotentialNodes = append(claim.Status.Scheduling.Scheduler.PotentialNodes, node.Name)
-			}
-			logger.V(5).Info("update potential nodes", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "potentialnodes", nodes)
-			if err := state.updateClaimStatus(ctx, index, claim); err != nil {
-				return framework.AsStatus(err)
-			}
-		}
-	}
+	state.potentialNodes = nodes
 
 	return nil
 }
@@ -402,6 +387,23 @@ func haveNode(nodeNames []string, nodeName string) bool {
 		}
 	}
 	return false
+}
+
+func doPotentialNodes(logger klog.Logger, claim *cdiv1alpha1.ResourceClaim, pod *v1.Pod, nodes []*v1.Node) {
+	// We change the SuitableNodes field if some new node
+	// became a candidate. This means the list may contain
+	// nodes that are not actually viable candidates right
+	// now, but it's okay to not remove them and it may
+	// help to avoid apiserver traffic.
+	msg := "no need to update potential nodes"
+	if !haveAllNodes(claim.Status.Scheduling.Scheduler.PotentialNodes, nodes) {
+		msg = "new potential nodes"
+		claim.Status.Scheduling.Scheduler.PotentialNodes = make([]string, 0, len(nodes))
+		for _, node := range nodes {
+			claim.Status.Scheduling.Scheduler.PotentialNodes = append(claim.Status.Scheduling.Scheduler.PotentialNodes, node.Name)
+		}
+	}
+	logger.V(5).Info(msg, "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "potentialnodes", nodes)
 }
 
 // Reserve reserves claims for the pod.
@@ -444,7 +446,10 @@ func (pl *dynamicResources) Reserve(ctx context.Context, cs *framework.CycleStat
 		case cdiv1alpha1.ResourceClaimPending:
 			// Must be delayed allocation. Tell driver to start allocation.
 			pending = true
+			claim := claim.DeepCopy()
 			claim.Status.Scheduling.Scheduler.SelectedNode = nodeName
+			doPotentialNodes(logger, claim, pod, state.potentialNodes)
+
 			klog.V(5).Info("start allocation", "pod", klog.KObj(pod), "node", klog.ObjectRef{Name: nodeName}, "resourceclaim", klog.KObj(claim))
 			if err := state.updateClaimStatus(ctx, index, claim); err != nil {
 				// We bail out early here instead of continuing with
