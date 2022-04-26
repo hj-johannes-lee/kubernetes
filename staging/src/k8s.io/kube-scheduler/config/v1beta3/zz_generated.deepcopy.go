@@ -75,6 +75,11 @@ func (in *Extender) DeepCopyInto(out *Extender) {
 		*out = make([]ExtenderManagedResource, len(*in))
 		copy(*out, *in)
 	}
+	if in.ManagedResourceDrivers != nil {
+		in, out := &in.ManagedResourceDrivers, &out.ManagedResourceDrivers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

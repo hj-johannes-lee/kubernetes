@@ -28,6 +28,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	"k8s.io/kubernetes/pkg/scheduler/util"
+	"sigs.k8s.io/kustomize/kyaml/sets"
 )
 
 // FitPredicate is a function type which is used in fake extender.
@@ -145,14 +146,15 @@ func (pl *node2PrioritizerPlugin) ScoreExtensions() framework.ScoreExtensions {
 type FakeExtender struct {
 	// ExtenderName indicates this fake extender's name.
 	// Note that extender name should be unique.
-	ExtenderName     string
-	Predicates       []FitPredicate
-	Prioritizers     []PriorityConfig
-	Weight           int64
-	NodeCacheCapable bool
-	FilteredNodes    []*v1.Node
-	UnInterested     bool
-	Ignorable        bool
+	ExtenderName           string
+	Predicates             []FitPredicate
+	Prioritizers           []PriorityConfig
+	Weight                 int64
+	NodeCacheCapable       bool
+	FilteredNodes          []*v1.Node
+	UnInterested           bool
+	Ignorable              bool
+	ManagedResourceDrivers sets.String
 
 	// Cached node information for fake extender
 	CachedNodeNameToInfo map[string]*framework.NodeInfo
@@ -380,6 +382,12 @@ func (f *FakeExtender) IsBinder() bool {
 // IsInterested returns a bool indicating whether this extender is interested in this Pod.
 func (f *FakeExtender) IsInterested(pod *v1.Pod) bool {
 	return !f.UnInterested
+}
+
+// IsManagingResourceDriver returns true if the extender handles
+// pod.Spec.ResourceClaims that use the given driver.
+func (f *FakeExtender) IsFilteringResourceDriver(driverName string) bool {
+	return f.ManagedResourceDrivers.Has(driverName)
 }
 
 var _ framework.Extender = &FakeExtender{}

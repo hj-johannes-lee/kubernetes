@@ -24,10 +24,14 @@ import (
 	"strings"
 	"time"
 
+	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/informers"
+	cdiv1alpha1listers "k8s.io/client-go/listers/cdi/v1alpha1"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/component-helpers/cdi/resourceclaim"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -40,16 +44,19 @@ const (
 
 // HTTPExtender implements the Extender interface.
 type HTTPExtender struct {
-	extenderURL      string
-	preemptVerb      string
-	filterVerb       string
-	prioritizeVerb   string
-	bindVerb         string
-	weight           int64
-	client           *http.Client
-	nodeCacheCapable bool
-	managedResources sets.String
-	ignorable        bool
+	extenderURL            string
+	preemptVerb            string
+	filterVerb             string
+	prioritizeVerb         string
+	bindVerb               string
+	weight                 int64
+	client                 *http.Client
+	nodeCacheCapable       bool
+	managedResources       sets.String
+	managedResourceDrivers sets.String
+	ignorable              bool
+	resourceClaimLister    cdiv1alpha1listers.ResourceClaimLister
+	resourceClassLister    cdiv1alpha1listers.ResourceClassLister
 }
 
 func makeTransport(config *schedulerapi.Extender) (http.RoundTripper, error) {
@@ -83,7 +90,7 @@ func makeTransport(config *schedulerapi.Extender) (http.RoundTripper, error) {
 }
 
 // NewHTTPExtender creates an HTTPExtender object.
-func NewHTTPExtender(config *schedulerapi.Extender) (framework.Extender, error) {
+func NewHTTPExtender(config *schedulerapi.Extender, informerFactory informers.SharedInformerFactory) (framework.Extender, error) {
 	if config.HTTPTimeout.Duration.Nanoseconds() == 0 {
 		config.HTTPTimeout.Duration = time.Duration(DefaultExtenderTimeout)
 	}
@@ -100,17 +107,30 @@ func NewHTTPExtender(config *schedulerapi.Extender) (framework.Extender, error) 
 	for _, r := range config.ManagedResources {
 		managedResources.Insert(string(r.Name))
 	}
+	managedResourceDrivers := sets.NewString()
+	for _, resourceDriver := range config.ManagedResourceDrivers {
+		managedResourceDrivers.Insert(resourceDriver)
+	}
+	var resourceClaimLister cdiv1alpha1listers.ResourceClaimLister
+	var resourceClassLister cdiv1alpha1listers.ResourceClassLister
+	if len(managedResourceDrivers) > 0 {
+		resourceClaimLister = informerFactory.Cdi().V1alpha1().ResourceClaims().Lister()
+		resourceClassLister = informerFactory.Cdi().V1alpha1().ResourceClasses().Lister()
+	}
 	return &HTTPExtender{
-		extenderURL:      config.URLPrefix,
-		preemptVerb:      config.PreemptVerb,
-		filterVerb:       config.FilterVerb,
-		prioritizeVerb:   config.PrioritizeVerb,
-		bindVerb:         config.BindVerb,
-		weight:           config.Weight,
-		client:           client,
-		nodeCacheCapable: config.NodeCacheCapable,
-		managedResources: managedResources,
-		ignorable:        config.Ignorable,
+		extenderURL:            config.URLPrefix,
+		preemptVerb:            config.PreemptVerb,
+		filterVerb:             config.FilterVerb,
+		prioritizeVerb:         config.PrioritizeVerb,
+		bindVerb:               config.BindVerb,
+		weight:                 config.Weight,
+		client:                 client,
+		nodeCacheCapable:       config.NodeCacheCapable,
+		managedResources:       managedResources,
+		managedResourceDrivers: managedResourceDrivers,
+		ignorable:              config.Ignorable,
+		resourceClaimLister:    resourceClaimLister,
+		resourceClassLister:    resourceClassLister,
 	}, nil
 }
 
@@ -136,6 +156,9 @@ func Equal(e1, e2 *HTTPExtender) bool {
 		return false
 	}
 	if !e1.managedResources.Equal(e2.managedResources) {
+		return false
+	}
+	if !e1.managedResourceDrivers.Equal(e2.managedResourceDrivers) {
 		return false
 	}
 	if e1.ignorable != e2.ignorable {
@@ -441,16 +464,19 @@ func (h *HTTPExtender) send(action string, args interface{}, result interface{})
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-// IsInterested returns true if at least one extended resource requested by
+// IsInterested returns true if at least one resource requested by
 // this pod is managed by this extender.
 func (h *HTTPExtender) IsInterested(pod *v1.Pod) bool {
-	if h.managedResources.Len() == 0 {
+	if h.managedResources.Len() == 0 && h.managedResourceDrivers.Len() == 0 {
 		return true
 	}
 	if h.hasManagedResources(pod.Spec.Containers) {
 		return true
 	}
 	if h.hasManagedResources(pod.Spec.InitContainers) {
+		return true
+	}
+	if h.hasManagedResourceDrivers(pod) {
 		return true
 	}
 	return false
@@ -471,4 +497,44 @@ func (h *HTTPExtender) hasManagedResources(containers []v1.Container) bool {
 		}
 	}
 	return false
+}
+
+// hasManagedResourceDrivers returns true if any of the ResourceClaims
+// references a ResourceClass whose driver name is listed as being managed by
+// the extender. If the driver name cannot be determined, false is
+// returned. The builtin dynamic resource plugin also checks this and prevents
+// scheduling of the pod in this case.
+func (h *HTTPExtender) hasManagedResourceDrivers(pod *v1.Pod) bool {
+	if len(h.managedResourceDrivers) == 0 {
+		return false
+	}
+
+	for _, podClaim := range pod.Spec.ResourceClaims {
+		claimName := resourceclaim.Name(pod, &podClaim)
+		claim, err := h.resourceClaimLister.ResourceClaims(pod.Namespace).Get(claimName)
+		if err != nil {
+			continue
+		}
+		// This mirrors the logic in dynamicResources.PreFilter.
+		driverName := claim.Status.DriverName
+		if claim.Status.Phase == cdiv1alpha1.ResourceClaimPending {
+			className := claim.Spec.ResourceClassName
+			class, err := h.resourceClassLister.Get(className)
+			if err != nil {
+				continue
+			}
+			driverName = class.DriverName
+		}
+		if h.managedResourceDrivers.Has(driverName) {
+			return true
+		}
+
+	}
+	return false
+}
+
+// IsFilteringResourceDriver returns true if the extender handles
+// filtering for pod.Spec.ResourceClaims that use the given driver.
+func (h *HTTPExtender) IsFilteringResourceDriver(driverName string) bool {
+	return h.filterVerb != "" && h.managedResourceDrivers.Has(driverName)
 }

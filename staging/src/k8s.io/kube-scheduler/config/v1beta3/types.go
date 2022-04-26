@@ -331,6 +331,19 @@ type Extender struct {
 	// +optional
 	// +listType=atomic
 	ManagedResources []ExtenderManagedResource `json:"managedResources,omitempty"`
+	// ManagedResourceDrivers is a list of resource driver names that are managed
+	// by this extender. A pod will be sent to the extender on the Filter, Prioritize
+	// and Bind (if the extender is the binder) phases iff the pod requests at least
+	// one ResourceClaim for which the resource driver name in the corresponding
+	// ResourceClass is listed here. In addition, the builtin dynamic resources
+	// plugin will skip setting SuitableNodes for claims managed by the extender
+	// if the extender has a FilterVerb.
+	//
+	// TODO: declare as alpha? Or do a v1beta4?
+	//
+	// +optional
+	// +listType=set
+	ManagedResourceDrivers []string `json:"managedResourceDrivers,omitempty"`
 	// Ignorable specifies if the extender is ignorable, i.e. scheduling should not
 	// fail when the extender returns an error or is not reachable.
 	Ignorable bool `json:"ignorable,omitempty"`

@@ -134,6 +134,11 @@ func (f *fakeExtender) IsInterested(pod *v1.Pod) bool {
 	return pod != nil && pod.Name == f.interestedPodName
 }
 
+func (f *fakeExtender) IsFilteringResourceDriver(driverName string) bool {
+	// TODO: add tests
+	return false
+}
+
 type falseMapPlugin struct{}
 
 func newFalseMapPlugin() frameworkruntime.PluginFactory {

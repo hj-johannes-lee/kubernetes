@@ -285,6 +285,7 @@ func autoConvert_v1beta3_Extender_To_config_Extender(in *v1beta3.Extender, out *
 	out.HTTPTimeout = in.HTTPTimeout
 	out.NodeCacheCapable = in.NodeCacheCapable
 	out.ManagedResources = *(*[]config.ExtenderManagedResource)(unsafe.Pointer(&in.ManagedResources))
+	out.ManagedResourceDrivers = *(*[]string)(unsafe.Pointer(&in.ManagedResourceDrivers))
 	out.Ignorable = in.Ignorable
 	return nil
 }
@@ -306,6 +307,7 @@ func autoConvert_config_Extender_To_v1beta3_Extender(in *config.Extender, out *v
 	out.HTTPTimeout = in.HTTPTimeout
 	out.NodeCacheCapable = in.NodeCacheCapable
 	out.ManagedResources = *(*[]v1beta3.ExtenderManagedResource)(unsafe.Pointer(&in.ManagedResources))
+	out.ManagedResourceDrivers = *(*[]string)(unsafe.Pointer(&in.ManagedResourceDrivers))
 	out.Ignorable = in.Ignorable
 	return nil
 }

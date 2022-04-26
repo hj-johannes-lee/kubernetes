@@ -44,13 +44,14 @@ var (
 	podName              = "my-pod"
 	podUID               = types.UID("1234")
 	resourceName         = "my-resource"
+	driverName           = "my-driver"
 	claimName            = podName + "-" + resourceName
 	namespace            = "default"
 	simplePod            = buildPod(corev1ac.Pod(podName, "default"))
 	podWithClaimName     = buildPod(corev1ac.Pod(podName, namespace).WithUID(podUID).WithSpec(corev1ac.PodSpec().WithResourceClaims(corev1ac.PodResourceClaim().WithName(resourceName).WithResourceClaimName(claimName))))
 	podWithClaimTemplate = buildPod(corev1ac.Pod(podName, namespace).WithUID(podUID).WithSpec(corev1ac.PodSpec().WithResourceClaims(corev1ac.PodResourceClaim().WithName(resourceName).WithTemplate(corev1ac.ResourceClaimTemplate()))))
 	workerNode           = buildNode(corev1ac.Node("worker"))
-	allocatedClaim       = buildResourceClaim(cdiv1alpha1ac.ResourceClaim(claimName, namespace).WithOwnerReferences(metav1ac.OwnerReference().WithUID(podUID).WithController(true)).WithStatus(cdiv1alpha1ac.ResourceClaimStatus().WithPhase(cdiv1alpha1.ResourceClaimAllocated).WithAllocation(cdiv1alpha1ac.AllocationResult().WithUserLimit(1))))
+	allocatedClaim       = buildResourceClaim(cdiv1alpha1ac.ResourceClaim(claimName, namespace).WithOwnerReferences(metav1ac.OwnerReference().WithUID(podUID).WithController(true)).WithStatus(cdiv1alpha1ac.ResourceClaimStatus().WithDriverName(driverName).WithPhase(cdiv1alpha1.ResourceClaimAllocated).WithAllocation(cdiv1alpha1ac.AllocationResult().WithUserLimit(1))))
 	otherClaim           = buildResourceClaim(cdiv1alpha1ac.ResourceClaim("not-my-claim", namespace))
 )
 
@@ -77,11 +78,13 @@ func TestDynamicResources(t *testing.T) {
 			nodes:  []*corev1.Node{workerNode},
 			claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim, otherClaim},
 			wantStateAfterPreFilter: stateData{
-				claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				claims:      []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				driverNames: []string{driverName},
 			},
 			wantFilterStatus: []*framework.Status{nil},
 			wantStateAfterFilter: stateData{
-				claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				claims:      []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				driverNames: []string{driverName},
 			},
 		},
 		"claim-template": {
@@ -89,11 +92,13 @@ func TestDynamicResources(t *testing.T) {
 			nodes:  []*corev1.Node{workerNode},
 			claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim, otherClaim},
 			wantStateAfterPreFilter: stateData{
-				claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				claims:      []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				driverNames: []string{driverName},
 			},
 			wantFilterStatus: []*framework.Status{nil},
 			wantStateAfterFilter: stateData{
-				claims: []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				claims:      []*cdiv1alpha1.ResourceClaim{allocatedClaim},
+				driverNames: []string{driverName},
 			},
 		},
 		"missing-claim": {

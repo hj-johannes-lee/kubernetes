@@ -265,7 +265,7 @@ func New(client clientset.Interface,
 
 	metrics.Register()
 
-	extenders, err := buildExtenders(options.extenders, options.profiles)
+	extenders, err := buildExtenders(options.extenders, options.profiles, informerFactory)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't build extenders: %w", err)
 	}
@@ -397,7 +397,7 @@ func NewInformerFactory(cs clientset.Interface, resyncPeriod time.Duration) info
 	return informerFactory
 }
 
-func buildExtenders(extenders []schedulerapi.Extender, profiles []schedulerapi.KubeSchedulerProfile) ([]framework.Extender, error) {
+func buildExtenders(extenders []schedulerapi.Extender, profiles []schedulerapi.KubeSchedulerProfile, informerFactory informers.SharedInformerFactory) ([]framework.Extender, error) {
 	var fExtenders []framework.Extender
 	if len(extenders) == 0 {
 		return nil, nil
@@ -407,7 +407,7 @@ func buildExtenders(extenders []schedulerapi.Extender, profiles []schedulerapi.K
 	var ignorableExtenders []framework.Extender
 	for i := range extenders {
 		klog.V(2).InfoS("Creating extender", "extender", extenders[i])
-		extender, err := NewHTTPExtender(&extenders[i])
+		extender, err := NewHTTPExtender(&extenders[i], informerFactory)
 		if err != nil {
 			return nil, err
 		}

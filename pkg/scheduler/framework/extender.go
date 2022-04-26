@@ -50,6 +50,10 @@ type Extender interface {
 	// this pod is managed by this extender.
 	IsInterested(pod *v1.Pod) bool
 
+	// IsFilteringResourceDriver returns true if the extender handles
+	// filtering for pod.Spec.ResourceClaims that use the given driver.
+	IsFilteringResourceDriver(driverName string) bool
+
 	// ProcessPreemption returns nodes with their victim pods processed by extender based on
 	// given:
 	//   1. Pod to schedule

@@ -557,6 +557,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
 	// Needed for dynamic resource allocation.
 	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation) {
 		kubeSchedulerRules = append(kubeSchedulerRules,
+			rbacv1helpers.NewRule(Read...).Groups(cdiGroup).Resources("resourceclasses").RuleOrDie(),
 			rbacv1helpers.NewRule(Read...).Groups(cdiGroup).Resources("resourceclaims").RuleOrDie(),
 			rbacv1helpers.NewRule(ReadUpdate...).Groups(cdiGroup).Resources("resourceclaims/status").RuleOrDie(),
 		)

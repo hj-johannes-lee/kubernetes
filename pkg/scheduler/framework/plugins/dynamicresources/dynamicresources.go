@@ -59,6 +59,9 @@ type stateData struct {
 	// Empty if the Pod has no claims.
 	claims []*cdiv1alpha1.ResourceClaim
 
+	// A valid driver name for each claim.
+	driverNames []string
+
 	// A copy of all nodes that fit the Pod. Set by PreScore,
 	// used by Reserve.
 	potentialNodes []*v1.Node
@@ -102,6 +105,8 @@ func (d *stateData) updateClaimStatus(ctx context.Context, index int, claim *cdi
 type dynamicResources struct {
 	clientset   kubernetes.Interface
 	claimLister cdiv1alpha1listers.ResourceClaimLister
+	classLister cdiv1alpha1listers.ResourceClassLister
+	extenders   []framework.Extender
 }
 
 // New initializes a new plugin and returns it.
@@ -109,6 +114,8 @@ func New(plArgs runtime.Object, fh framework.Handle) (framework.Plugin, error) {
 	return &dynamicResources{
 		clientset:   fh.ClientSet(),
 		claimLister: fh.SharedInformerFactory().Cdi().V1alpha1().ResourceClaims().Lister(),
+		classLister: fh.SharedInformerFactory().Cdi().V1alpha1().ResourceClasses().Lister(),
+		extenders:   fh.Extenders(),
 	}, nil
 }
 
@@ -204,7 +211,8 @@ func (pl *dynamicResources) PreFilter(ctx context.Context, state *framework.Cycl
 		return nil, nil
 	}
 
-	for _, claim := range claims {
+	driverNames := make([]string, len(claims))
+	for i, claim := range claims {
 		if claim.Spec.AllocationMode == v1.AllocationModeImmediate &&
 			claim.Status.Phase != cdiv1alpha1.ResourceClaimAllocated {
 			// This will get resolved by the resource driver.
@@ -220,9 +228,29 @@ func (pl *dynamicResources) PreFilter(ctx context.Context, state *framework.Cycl
 			// Resource is in use. The pod has to wait.
 			return nil, statusUnschedulable(logger, "resourceclaim in use", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim))
 		}
+		if claim.Status.Phase == cdiv1alpha1.ResourceClaimPending {
+			// For unallocated claims we have to get the driver name from
+			// the class. If that cannot be found, there is no point in
+			// trying to continue with pod scheduling because no resource
+			// driver will handle the claim.
+			className := claim.Spec.ResourceClassName
+			class, err := pl.classLister.Get(className)
+			if err != nil {
+				return nil, statusUnschedulable(logger, "retrieve resourceclass", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "err", err)
+			}
+			driverNames[i] = class.DriverName
+		} else {
+			// For all other claims, the driver name was recorded
+			// during allocation.
+			driverNames[i] = claim.Status.DriverName
+		}
 	}
 
-	state.Write(stateKey, &stateData{clientset: pl.clientset, claims: claims})
+	state.Write(stateKey, &stateData{
+		clientset:   pl.clientset,
+		claims:      claims,
+		driverNames: driverNames,
+	})
 	return nil, nil
 }
 
@@ -389,13 +417,23 @@ func haveNode(nodeNames []string, nodeName string) bool {
 	return false
 }
 
-func doPotentialNodes(logger klog.Logger, claim *cdiv1alpha1.ResourceClaim, pod *v1.Pod, nodes []*v1.Node) {
+func (pl *dynamicResources) doPotentialNodes(logger klog.Logger, claim *cdiv1alpha1.ResourceClaim, driverName string, pod *v1.Pod, nodes []*v1.Node) {
+	msg := "no need to update potential nodes"
+	defer logger.V(5).Info(msg, "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "potentialnodes", nodes)
+
+	for _, extender := range pl.extenders {
+		if extender.IsFilteringResourceDriver(driverName) {
+			// Skip claim, work done by extender.
+			msg = "potential nodes handled by scheduler extender"
+			return
+		}
+	}
+
 	// We change the SuitableNodes field if some new node
 	// became a candidate. This means the list may contain
 	// nodes that are not actually viable candidates right
 	// now, but it's okay to not remove them and it may
 	// help to avoid apiserver traffic.
-	msg := "no need to update potential nodes"
 	if !haveAllNodes(claim.Status.Scheduling.Scheduler.PotentialNodes, nodes) {
 		msg = "new potential nodes"
 		claim.Status.Scheduling.Scheduler.PotentialNodes = make([]string, 0, len(nodes))
@@ -403,7 +441,6 @@ func doPotentialNodes(logger klog.Logger, claim *cdiv1alpha1.ResourceClaim, pod 
 			claim.Status.Scheduling.Scheduler.PotentialNodes = append(claim.Status.Scheduling.Scheduler.PotentialNodes, node.Name)
 		}
 	}
-	logger.V(5).Info(msg, "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "potentialnodes", nodes)
 }
 
 // Reserve reserves claims for the pod.
@@ -448,7 +485,7 @@ func (pl *dynamicResources) Reserve(ctx context.Context, cs *framework.CycleStat
 			pending = true
 			claim := claim.DeepCopy()
 			claim.Status.Scheduling.Scheduler.SelectedNode = nodeName
-			doPotentialNodes(logger, claim, pod, state.potentialNodes)
+			pl.doPotentialNodes(logger, claim, state.driverNames[index], pod, state.potentialNodes)
 
 			klog.V(5).Info("start allocation", "pod", klog.KObj(pod), "node", klog.ObjectRef{Name: nodeName}, "resourceclaim", klog.KObj(claim))
 			if err := state.updateClaimStatus(ctx, index, claim); err != nil {
