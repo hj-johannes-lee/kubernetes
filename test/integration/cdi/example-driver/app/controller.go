@@ -22,6 +22,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"path"
 	"strings"
 
 	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
@@ -30,15 +32,22 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 
 	"k8s.io/kubernetes/test/integration/cdi/example-driver/controller"
 )
 
-func runController(ctx context.Context, clientset kubernetes.Interface, driverName string, workers int) {
+func runController(ctx context.Context, clientset kubernetes.Interface, driverName string, workers int, mux *http.ServeMux, filterPath string) {
 	driver := &exampleDriver{}
 	informerFactory := informers.NewSharedInformerFactory(clientset, 0 /* resync period */)
 	ctrl := controller.New(driverName, driver, clientset, informerFactory)
 	informerFactory.Start(ctx.Done())
+
+	if filterPath != "" {
+		actualPath := path.Join("/", filterPath)
+		klog.InfoS("Starting scheduler extender filter", "path", actualPath)
+		mux.HandleFunc(actualPath, ctrl.Filter)
+	}
 	ctrl.Run(ctx, workers)
 }
 

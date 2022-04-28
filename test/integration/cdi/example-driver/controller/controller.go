@@ -18,12 +18,16 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	cdiv1alpha1 "k8s.io/api/cdi/v1alpha1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -36,7 +40,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/component-helpers/cdi/resourceclaim"
 	"k8s.io/klog/v2"
+	schedulerapi "k8s.io/kube-scheduler/extender/v1"
 )
 
 // Controller watches ResourceClaims and triggers allocation and deallocation
@@ -44,6 +50,9 @@ import (
 type Controller interface {
 	// Run starts the controller.
 	Run(ctx context.Context, workers int)
+
+	// Filter implements the scheduler extender filter verb.
+	Filter(http.ResponseWriter, *http.Request)
 }
 
 var ErrReschedule = errors.New("reschedule")
@@ -202,6 +211,147 @@ func (ctrl *controller) Run(ctx context.Context, workers int) {
 	}
 
 	<-stopCh
+}
+
+// Filter implements the scheduler extender filter verb.
+func (ctrl *controller) Filter(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// From https://github.com/Huang-Wei/sample-scheduler-extender/blob/047fdd5ae8b1a6d7fdc0e6d20ce4d70a1d6e7178/routers.go#L19-L39
+	var args schedulerapi.ExtenderArgs
+	var result *schedulerapi.ExtenderFilterResult
+	err := json.NewDecoder(r.Body).Decode(&args)
+	if err == nil {
+		result, err = ctrl.doFilter(ctx, args)
+	}
+
+	// Always try to write a resonable response.
+	if result == nil && err != nil {
+		result = &schedulerapi.ExtenderFilterResult{
+			Error: err.Error(),
+		}
+	}
+	if response, err := json.Marshal(result); err != nil {
+		klog.ErrorS(err, "JSON encoding")
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(response)
+	}
+}
+
+func (ctrl *controller) doFilter(ctx context.Context, args schedulerapi.ExtenderArgs) (*schedulerapi.ExtenderFilterResult, error) {
+	if args.Pod == nil ||
+		args.Pod.Name == "" ||
+		(args.NodeNames == nil && args.Nodes == nil) {
+		return nil, errors.New("incomplete parameters")
+	}
+	pod := args.Pod
+
+	// TODO: contextual logging: log := s.log.WithValues("pod", pod.Name)
+	klog.V(5).InfoS("node filter", "request", args)
+
+	potentialNodes := sets.NewString()
+	if args.NodeNames != nil {
+		potentialNodes.Insert((*args.NodeNames)...)
+	} else {
+		// Fallback for Extender.NodeCacheCapable == false:
+		// not recommended, but may be used by users anyway.
+		klog.InfoS("NodeCacheCapable is false in Extender configuration, should be set to true.")
+		for _, node := range args.Nodes.Items {
+			potentialNodes.Insert(node.Name)
+		}
+	}
+
+	// We need to check all claims that this driver would allocate via
+	// delayed allocation. We don't need to check allocated claims or
+	// claims with immediate allocation because those have enough
+	// information to be handled by the builtin dynamic resources plugin.
+	failedNodes := map[string][]string{}
+	for _, resource := range pod.Spec.ResourceClaims {
+		claimName := resourceclaim.Name(pod, &resource)
+		isEphemeral := resource.ResourceClaimName == nil
+		claim, err := ctrl.claimLister.ResourceClaims(pod.Namespace).Get(claimName)
+		if err != nil {
+			// The error usually has already enough context ("resourcevolumeclaim "myclaim" not found"),
+			// but we can do better for generic ephemeral inline volumes where that situation
+			// is normal directly after creating a pod.
+			if isEphemeral && apierrors.IsNotFound(err) {
+				err = fmt.Errorf("waiting for dynamic resource controller to create the resourceclaim %q", claimName)
+			}
+			return nil, err
+		}
+
+		if claim.DeletionTimestamp != nil {
+			return nil, fmt.Errorf("resourceclaim %q is being deleted", claim.Name)
+		}
+
+		if isEphemeral {
+			if err := resourceclaim.IsForPod(pod, claim); err != nil {
+				return nil, err
+			}
+		}
+
+		if claim.Status.Phase != cdiv1alpha1.ResourceClaimPending ||
+			claim.Spec.AllocationMode != v1.AllocationModeDelayed {
+			continue
+		}
+
+		class, err := ctrl.rcLister.Get(claim.Spec.ResourceClassName)
+		if err != nil {
+			return nil, err
+		}
+		if class.DriverName != ctrl.name {
+			continue
+		}
+
+		// Inject the current list of potential nodes, i.e. pretend that
+		// the scheduler used communication through the API server.
+		claim = claim.DeepCopy()
+		claim.Status.Scheduling.Scheduler.PotentialNodes = potentialNodes.List()
+		unsuitableNodes, err := ctrl.driver.UnsuitableNodes(ctx, claim)
+		if err != nil {
+			return nil, fmt.Errorf("checking for unsuitable nodes: %v", err)
+		}
+
+		// Rememeber for which nodes the claim wasn't suitable
+		// and continue without those.
+		for _, unsuitableNode := range unsuitableNodes.List() {
+			potentialNodes.Delete(unsuitableNode)
+			claims := failedNodes[unsuitableNode]
+			claims = append(claims, claim.Name)
+			failedNodes[unsuitableNode] = claims
+		}
+	}
+
+	response := &schedulerapi.ExtenderFilterResult{
+		FailedNodes: schedulerapi.FailedNodesMap{},
+	}
+	for nodeName, claimNames := range failedNodes {
+		response.FailedNodes[nodeName] = "unsuitable for claim(s) " + strings.Join(claimNames, ", ")
+	}
+	if args.NodeNames != nil {
+		remainingNodes := potentialNodes.List()
+		response.NodeNames = &remainingNodes
+	} else {
+		// fallback response...
+		response.Nodes = &v1.NodeList{}
+		for nodeName := range potentialNodes {
+			response.Nodes.Items = append(response.Nodes.Items, getNode(args.Nodes.Items, nodeName))
+		}
+	}
+	klog.V(5).InfoS("node filter", "response", response)
+	return response, nil
+}
+
+func getNode(nodes []v1.Node, nodeName string) v1.Node {
+	for _, node := range nodes {
+		if node.Name == nodeName {
+			return node
+		}
+	}
+	return v1.Node{}
 }
 
 // errRequeue is a special error instance that functions can return

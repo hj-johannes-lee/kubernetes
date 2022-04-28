@@ -1,0 +1,16 @@
+# This needs to go into a kubescheduler.config.k8s.io/v1beta2 KubeSchedulerConfiguration,
+# for example with SCHEDULER_CONFIG_APPENDIX=<this file> ... hack/local-up-cluster.sh.
+# It instructs the scheduler to let the example resource driver handle filtering.
+#
+# The example resource driver must be running on the same host with
+#   --http-endpoint=:9999 controller --filter-path=/filter
+#
+# If it is not running, the scheduler will fail pod scheduling for pods
+# using the driver.
+
+extenders:
+- urlPrefix: http://localhost:9999
+  filterVerb: filter
+  nodeCacheCapable: true
+  managedResourceDrivers:
+  - example-driver.cdi.k8s.io

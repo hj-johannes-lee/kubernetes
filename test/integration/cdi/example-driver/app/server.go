@@ -189,6 +189,8 @@ func NewCommand() *cobra.Command {
 		"Duration, in seconds, that the acting leader will retry refreshing leadership before giving up.")
 	leaderElectionRetryPeriod := fs.Duration("leader-election-retry-period", 5*time.Second,
 		"Duration, in seconds, the LeaderElector clients should wait between tries of actions.")
+	fs = controllerFlagSets.FlagSet("scheduler extender")
+	filterPath := fs.String("filter-path", "", "The HTTP path for the kube-scheduler extender filter operation, disabled if empty.")
 	fs = controller.Flags()
 	for _, f := range controllerFlagSets.FlagSets {
 		fs.AddFlagSet(f)
@@ -196,7 +198,7 @@ func NewCommand() *cobra.Command {
 
 	controller.RunE = func(cmd *cobra.Command, args []string) error {
 		run := func() {
-			runController(ctx, clientset, *driverName, *workers)
+			runController(ctx, clientset, *driverName, *workers, mux, *filterPath)
 		}
 
 		if !*enableLeaderElection {
