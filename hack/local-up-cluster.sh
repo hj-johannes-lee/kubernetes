@@ -95,6 +95,14 @@ STORAGE_MEDIA_TYPE=${STORAGE_MEDIA_TYPE:-"application/vnd.kubernetes.protobuf"}
 # preserve etcd data. you also need to set ETCD_DIR.
 PRESERVE_ETCD="${PRESERVE_ETCD:-false}"
 
+# Additional configuration fragments that get appended at the end
+# of generated configuration files.
+EGRESS_SELECTOR_CONFIG_APPENDIX="${EGRESS_SELECTOR_CONFIG_APPENDIX:-/dev/null}"
+AUDIT_POLICY_CONFIG_APPENDIX="${AUDIT_POLICY_CONFIG_APPENDIX:-/dev/null}"
+KUBELET_CONFIG_APPENDIX="${KUBELET_CONFIG_APPENDIX:-/dev/null}"
+PROXY_CONFIG_APPENDIX="${PROXY_CONFIG_APPENDIX:-/dev/null}"
+SCHEDULER_CONFIG_APPENDIX="${SCHEDULER_CONFIG_APPENDIX:-/dev/null}"
+
 # enable Kubernetes-CSI snapshotter
 ENABLE_CSI_SNAPSHOTTER=${ENABLE_CSI_SNAPSHOTTER:-false}
 
@@ -526,7 +534,7 @@ function start_apiserver {
     fi
 
     if [[ -z "${EGRESS_SELECTOR_CONFIG_FILE:-}" ]]; then
-      cat <<EOF > /tmp/kube_egress_selector_configuration.yaml
+      cat - "${EGRESS_SELECTOR_CONFIG_APPENDIX}" <<EOF > /tmp/kube_egress_selector_configuration.yaml
 apiVersion: apiserver.k8s.io/v1beta1
 kind: EgressSelectorConfiguration
 egressSelections:
@@ -544,7 +552,7 @@ EOF
     fi
 
     if [[ -z "${AUDIT_POLICY_FILE}" ]]; then
-      cat <<EOF > /tmp/kube-audit-policy-file
+      cat - "${AUDIT_POLICY_CONFIG_APPENDIX}" <<EOF > /tmp/kube-audit-policy-file
 # Log all requests at the Metadata level.
 apiVersion: audit.k8s.io/v1
 kind: Policy
@@ -818,7 +826,10 @@ EOF
       if [[ -n ${FEATURE_GATES} ]]; then
         parse_feature_gates "${FEATURE_GATES}"
       fi
+
+      cat "${KUBELET_CONFIG_APPENDIX}"
     } >>/tmp/kubelet.yaml
+
 
     # shellcheck disable=SC2024
     sudo -E "${GO_OUT}/kubelet" "${all_kubelet_flags[@]}" \
@@ -842,7 +853,7 @@ function start_kubeproxy {
       wait_node_ready
     fi
 
-    cat <<EOF > /tmp/kube-proxy.yaml
+    cat - "${PROXY_CONFIG_APPENDIX}" <<EOF > /tmp/kube-proxy.yaml
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
 clientConnection:
@@ -876,7 +887,7 @@ EOF
 function start_kubescheduler {
     SCHEDULER_LOG=${LOG_DIR}/kube-scheduler.log
 
-    cat <<EOF > /tmp/kube-scheduler.yaml
+    cat - "${SCHEDULER_CONFIG_APPENDIX}" <<EOF > /tmp/kube-scheduler.yaml
 apiVersion: kubescheduler.config.k8s.io/v1beta2
 kind: KubeSchedulerConfiguration
 clientConnection:
