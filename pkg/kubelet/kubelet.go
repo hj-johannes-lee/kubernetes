@@ -753,7 +753,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	// setup resourceManager
 	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation) {
-		klet.resourceManager = resourcemanager.NewResourceManager(nodeName)
+		klet.resourceManager = resourcemanager.NewResourceManager(nodeName, klet.podManager)
 	}
 
 	// setup volumeManager
