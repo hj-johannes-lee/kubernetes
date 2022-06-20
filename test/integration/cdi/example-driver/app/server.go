@@ -42,6 +42,7 @@ import (
 	"k8s.io/component-base/term"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/test/integration/cdi/example-driver/leaderelection"
+	"k8s.io/kubernetes/test/integration/cdi/example-driver/server"
 )
 
 // NewCommand creates a *cobra.Command object with default parameters.
@@ -237,13 +238,20 @@ func NewCommand() *cobra.Command {
 	}
 	cmd.AddCommand(controller)
 
+	// kubelet plugin
+	kubeletPluginFlagSets := cliflag.NamedFlagSets{}
+	fs = kubeletPluginFlagSets.FlagSet("kubelet plugin")
+
+	cdiAddress := fs.String("cdi-address", "/var/lib/kubelet/plugins/example-driver/cdi.sock", "Path of the CDI driver socket that the node-driver-registrar will connect to.")
+	pluginRegistrationPath := fs.String("plugin-registration-path", "/var/lib/kubelet/plugins_registry", "Path to Kubernetes plugin registration directory.")
+
 	kubeletPlugin := &cobra.Command{
 		Use:   "kubelet-plugin",
 		Short: "run as kubelet plugin",
 		Long:  "cdi-example-driver kubelet-plugin runs as a device plugin for kubelet that supports dynamic resource allocation.",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("%s: not implemented", cmd.Use)
+			return server.RunServer(*driverName, *cdiAddress, *pluginRegistrationPath)
 		},
 	}
 	cmd.AddCommand(kubeletPlugin)
