@@ -495,6 +495,7 @@ func (ctrl *controller) syncPendingClaim(ctx context.Context, claim *cdiv1alpha1
 			claim.Status.Allocation = *allocation
 			claim.Status.Scheduling = cdiv1alpha1.SchedulingStatus{}
 			claim.Status.Phase = cdiv1alpha1.ResourceClaimAllocated
+			claim.Status.DriverName = class.DriverName
 			if _, err := ctrl.kubeClient.CdiV1alpha1().ResourceClaims(claim.Namespace).UpdateStatus(ctx, claim, metav1.UpdateOptions{}); err != nil {
 				return fmt.Errorf("add allocation: %v", err)
 			}
