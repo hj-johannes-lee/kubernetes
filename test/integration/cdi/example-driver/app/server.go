@@ -244,13 +244,30 @@ func NewCommand() *cobra.Command {
 	}
 	cmd.AddCommand(controller)
 
+	// kubelet plugin
+	kubeletPluginFlagSets := cliflag.NamedFlagSets{}
+	fs = kubeletPluginFlagSets.FlagSet("kubelet plugin")
+
+	cdiAddress := fs.String("cdi-address", "/var/lib/kubelet/plugins/example-driver/cdi.sock", "Path to the CDI driver socket kubelet will use to issue CSI operations.")
+	pluginRegistrationPath := fs.String("plugin-registration-path", "/var/lib/kubelet/plugins_registry", "Path to Kubernetes plugin registration socket.")
+
 	kubeletPlugin := &cobra.Command{
 		Use:   "kubelet-plugin",
 		Short: "run as kubelet plugin",
 		Long:  "cdi-example-driver kubelet-plugin runs as a device plugin for kubelet that supports dynamic resource allocation.",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("%s: not implemented", cmd.Use)
+			config := pluginConfig{
+				driverName:             *driverName,
+				draAddress:             *cdiAddress,
+				pluginRegistrationPath: *pluginRegistrationPath,
+			}
+
+			driver, err := newExampleDriver(config)
+			if err != nil {
+				return err
+			}
+			return driver.startPlugin()
 		},
 	}
 	cmd.AddCommand(kubeletPlugin)
