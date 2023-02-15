@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -56,35 +58,65 @@ var _ = SIGDescribe("Pod exec", func() {
 	})
 
 	ginkgo.It("works under load", func(ctx context.Context) {
-		isTimeout := false
-		go func() {
-			time.Sleep(time.Second * 20)
-			isTimeout = true
-		}()
-		for {
-			if isTimeout {
-				break
-			}
-			data := generateRandomBytes(102400)
-			stdout, _, err := e2epod.ExecWithOptions(f, e2epod.ExecOptions{
-				Command:            []string{"cat", "-"},
-				Namespace:          f.Namespace.Name,
-				PodName:            pod.Name,
-				ContainerName:      "write-pod",
-				Stdin:              bytes.NewBuffer(data),
-				CaptureStdout:      true,
-				CaptureStderr:      true,
-				PreserveWhitespace: false,
-			})
-			if err != nil {
-				framework.Failf("error of ExecWithOptions: %v", err)
-			}
-			stdout_bytes := []byte(stdout)
-			res := bytes.Compare(data, stdout_bytes)
-			if res != 0 {
-				framework.Failf("wrong stdout found:\nlen(data):\n%v\nlen(stdout):\n%v\n", len(data), len(stdout_bytes))
-			}
+		start := time.Now()
+		duration := 3 * time.Minute
+		workers := 20
+
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for i := 0; i < workers; i++ {
+			go func(worker int) {
+				ginkgo.By(fmt.Sprintf("Worker #%d started.", worker))
+				defer wg.Done()
+				defer ginkgo.GinkgoRecover()
+				defer func() {
+					// Here we detect failures, do
+					// something, then pass that failure on
+					// to GinkgoRecover.
+					if r := recover(); r != nil {
+						// Notify other workers that they can stop prematurely.
+						cancel()
+						ginkgo.By(fmt.Sprintf("Worker #%d failed.", worker))
+						panic(r)
+					}
+					ginkgo.By(fmt.Sprintf("Worker #%d completed successfully.", worker))
+				}()
+
+				// Busy loop and check as often as possible
+				// during the entire test runtime until the
+				// time runs out, the test gets interrupted
+				// (parent context), or some other worker fails
+				// (our context).
+				for i := 0; time.Now().Sub(start) <= duration && ctx.Err() == nil; i++ {
+					data := generateRandomBytes(102400)
+					stdout, _, err := e2epod.ExecWithOptions(f, e2epod.ExecOptions{
+						Command:            []string{"cat", "-"},
+						Namespace:          f.Namespace.Name,
+						PodName:            pod.Name,
+						ContainerName:      "write-pod",
+						Stdin:              bytes.NewBuffer(data),
+						CaptureStdout:      true,
+						CaptureStderr:      true,
+						PreserveWhitespace: false,
+						Quiet:              true, // Avoid dumping this struct, which would include all of the stdin buffer..
+					})
+					if err != nil {
+						framework.Failf("attempt #%d in worker #%d: error of ExecWithOptions: %v", i, worker, err)
+					}
+					stdout_bytes := []byte(stdout)
+					res := bytes.Compare(data, stdout_bytes)
+					if res != 0 {
+						framework.Failf("attempt #%d in worker #%d: wrong stdout found:\nlen(data):\n%v\nlen(stdout):\n%v\n", i, worker, len(data), len(stdout_bytes))
+					}
+				}
+			}(i)
 		}
+
+		// Wait for all workers to succeed or fail.
+		wg.Wait()
 	})
 })
 
